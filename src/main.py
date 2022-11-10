@@ -3,8 +3,6 @@ import logging
 import os
 import platform
 import json
-import subprocess
-import sys
 from datetime import datetime
 from requests import Response, put, post, patch
 from typing import Optional, Dict, Any
