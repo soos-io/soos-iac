@@ -63,14 +63,25 @@ class SOOSIaCAnalysis:
         self.output: str = Constants.DEFAULT_SCAN_OUTPUT
         self.severity: Optional[str] = None
         self.target_to_scan: Optional[str] = None
+        self.debug: bool = False
+        self.trace: bool = False
 
     def parse_configuration(self, configuration: Dict, target_to_scan: str):
         self.log_level = configuration.get("logLevel", LogLevel.INFO)
         logging.getLogger("SOOS IaC").setLevel(self.log_level)
         log(json.dumps(configuration, indent=2), log_level=LogLevel.DEBUG)
         # Common SOOS variables
-        self.client_id = valid_required("clientId", configuration.get("clientId"),)
-        self.api_key = valid_required("apiKey", configuration.get("apiKey"))
+        
+        self.client_id = configuration.get("clientId")
+        if self.client_id is None:
+            self.client_id = os.environ.get(Constants.SOOS_CLIENT_ID)
+            valid_required("clientId", self.client_id)
+
+        self.api_key = configuration.get("apiKey")
+        if self.api_key is None:
+            self.api_key = os.environ.get(Constants.SOOS_API_KEY)
+            valid_required("apiKey", self.api_key)
+
         self.project_name = valid_required("projectName", configuration.get("projectName"))
         self.base_uri = configuration.get("apiURL", Constants.DEFAULT_BASE_URL)
         self.on_failure = configuration.get("onFailure")
@@ -86,6 +97,8 @@ class SOOSIaCAnalysis:
         # Trivy specific params
         self.severity = configuration.get("severity", Constants.DEFAULT_SCAN_SEVERITY)
         self.target_to_scan = valid_required("Target to scan", target_to_scan)
+        self.debug = configuration.get("debug", False)
+        self.trace = configuration.get("trace", False)
     
     def parse_args(self) -> None:
         parser = ArgumentParser(description="SOOS IaC")
@@ -106,7 +119,7 @@ class SOOSIaCAnalysis:
         )
         parser.add_argument("--clientId", help="SOOS Client ID - get yours from https://app.soos.io/integrate/sca", required=False)
         parser.add_argument("--apiKey", help="SOOS API Key - get yours from https://app.soos.io/integrate/sca", required=False)
-        parser.add_argument("--projectName", help="Project Name - this is what will be displayed in the SOOS app", required=False)
+        parser.add_argument("--projectName", help="Project Name - this is what will be displayed in the SOOS app.", required=False)
         parser.add_argument(
             "--apiURL",
             help="SOOS API URL - Intended for internal use only, do not modify.",
@@ -115,8 +128,28 @@ class SOOSIaCAnalysis:
         )
         parser.add_argument(
             "--logLevel",
-            help="Minimum level to show logs: PASS, IGNORE, INFO, WARN or FAIL",
+            help="Minimum level to show logs: PASS, IGNORE, INFO, WARN or FAIL.",
             default="INFO",
+            required=False,
+        )
+        parser.add_argument(
+            "--debug",
+            help="Enable debug logging on trivy.",
+            action="store_true",
+            default=False,
+            required=False,
+        )
+        parser.add_argument(
+            "--severity",
+            help="Comma separated list of vulnerability severities to include in the report. Default is 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL' (all possible values).",
+            default=Constants.DEFAULT_SCAN_SEVERITY,
+            required=False,
+        )
+        parser.add_argument(
+            "--trace",
+            help="Enable more verbose trace output for custom queries on trivy.",
+            action="store_true",
+            default=False,
             required=False,
         )
         parser.add_argument(
@@ -149,21 +182,21 @@ class SOOSIaCAnalysis:
         )
         parser.add_argument(
             "--onFailure",
-            help="Action to perform when the scan fails. Options: fail_the_build, continue_on_failure",
+            help="Action to perform when the scan fails. Options: fail_the_build, continue_on_failure.",
             type=str,
             default="continue_on_failure",
             required=False,
         )
         parser.add_argument(
             "--commitHash",
-            help="The commit hash value from the SCM System",
+            help="The commit hash value from the SCM System.",
             type=str,
             default=None,
             required=False,
         )
         parser.add_argument(
             "--branchName",
-            help="The name of the branch from the SCM System",
+            help="The name of the branch from the SCM System.",
             type=str,
             default=None,
             nargs="*",
@@ -171,13 +204,13 @@ class SOOSIaCAnalysis:
         )
         parser.add_argument(
             "--branchURI",
-            help="The URI to the branch from the SCM System",
+            help="The URI to the branch from the SCM System.",
             default=None,
             required=False,
         )
         parser.add_argument(
             "--buildVersion",
-            help="Version of application build artifacts",
+            help="Version of application build artifacts.",
             type=str,
             default=None,
             required=False,
@@ -191,19 +224,28 @@ class SOOSIaCAnalysis:
         )
         parser.add_argument(
             "--operatingEnvironment",
-            help="Set Operating environment for information purposes only",
+            help="Set Operating environment for information purposes only.",
             type=str,
             default=None,
             nargs="*",
             required=False,
         )
-        log("trying to parse args")
+        log("Parsing arguments", log_level=LogLevel.INFO)
         args: Namespace = parser.parse_args()
         self.parse_configuration(vars(args), args.targetToScan)
 
     def get_command(self):
-        return Constants.DEFAULT_COMMAND_TEMPLATE.format(severity=self.severity, format=self.format, output=self.output, scan_type=self.scan_type, target_to_scan=self.target_to_scan)
+        base_command = Constants.DEFAULT_COMMAND_TEMPLATE.format(severity=self.severity, format=self.format, output=self.output, scan_type=self.scan_type, target_to_scan=self.target_to_scan)
+        full_command = self.add_trivy_extra_args(base_command)
+        return full_command
 
+    def add_trivy_extra_args(self, command: str) -> str:
+        if self.debug:
+            command += " --debug"
+        if self.trace:
+            command += " --trace"
+        return command
+        
     def __generate_start_analysis_url__(self) -> str:
         url = Constants.URI_START_IAC_ANALYSIS_TEMPLATE.format(soos_base_uri=self.base_uri,
                                                                 soos_client_id=self.client_id)
@@ -442,4 +484,3 @@ class SOOSIaCAnalysis:
 if __name__ == "__main__":
     iacAnalysis = SOOSIaCAnalysis()
     iacAnalysis.run_analysis()
-    
