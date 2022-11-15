@@ -71,7 +71,6 @@ class SOOSIaCAnalysis:
         logging.getLogger("SOOS IaC").setLevel(self.log_level)
         log(json.dumps(configuration, indent=2), log_level=LogLevel.DEBUG)
         # Common SOOS variables
-        
         self.client_id = configuration.get("clientId")
         if self.client_id is None:
             self.client_id = os.environ.get(Constants.SOOS_CLIENT_ID)
